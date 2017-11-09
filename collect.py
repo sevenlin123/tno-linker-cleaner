@@ -1,3 +1,13 @@
+##########################################################################
+#
+# collect.py, version 0.1
+#
+# group the tracks from same objects with DBSCAN algorithm and orbit_fit
+#
+# Author: 
+# Edward Lin: hsingwel@umich.edu
+##########################################################################
+
 from __future__ import division
 import os, glob, sys
 import pandas as pd
@@ -52,7 +62,7 @@ class collect_object:
         
     def clustering(self):
         db = DBSCAN(eps=0.0001, min_samples=1, n_jobs=-1)
-        db.fit(objects.abg)
+        db.fit(self.abg)
         self.labels = db.labels_
         
     def group(self, label):
@@ -67,7 +77,7 @@ class collect_object:
         return new_track.drop_duplicates().sort_values(by='date')
     
     def group_tracks(self):
-        self.new_tracks_clustering = map(self.group, np.unique(objects.labels))
+        self.new_tracks_clustering = map(self.group, np.unique(self.labels))
     
     def group_tracks_orbfit(self, remain_tracks):
         print len(remain_tracks),
