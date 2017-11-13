@@ -2,12 +2,15 @@
 
 ##########################################################################
 #
-# connect.py, version 0.1
+# connect.py, version 0.2
 #
 # Connect triplets to the pairs in the other year. 
 #
 # Author: 
 # Edward Lin: hsingwel@umich.edu
+#
+#v0.2: output every 'Five' instead group them together
+#      connect pairs in every available years
 ##########################################################################
 
 from __future__ import division
@@ -20,7 +23,7 @@ import pickle
 from deparallax import topo_to_bary
 from scipy.spatial import cKDTree as KDTree
 from scipy.stats import linregress
-import os, sys
+import os, sys, glob
 pd.options.mode.chained_assignment = None
 
 class deparallaxed_triplets:
@@ -516,29 +519,30 @@ class connecting_pairs:
         
     def output(self, triplet, pairs):
         #date,ra,dec,expnum,exptime,band,ccd,mag,ml_score,objid,fakeid
-        cand_id = [triplet['id1'], triplet['id2'], triplet['id3']] + list(pairs['id1']) + list(pairs['id2'])
-        cand_ra = [triplet['ra1'], triplet['ra2'], triplet['ra3']] + list(pairs['ra1']) + list(pairs['ra2'])
-        cand_dec = [triplet['dec1'], triplet['dec2'], triplet['dec3']] + list(pairs['dec1']) + list(pairs['dec2'])
-        cand_date = [triplet['date1'], triplet['date2'], triplet['date3']] + list(pairs['date1']) + list(pairs['date2'])
-        cand_expnum = [triplet['expnum1'], triplet['expnum2'], triplet['expnum3']] + list(pairs['expnum1']) + list(pairs['expnum2'])
-        cand_exptime = [triplet['exptime1'], triplet['exptime2'], triplet['exptime3']] + list(pairs['exptime1']) + list(pairs['exptime2'])
-        cand_band = [triplet['band1'], triplet['band2'], triplet['band3']] + list(pairs['band1']) + list(pairs['band2'])
-        cand_ccd = [triplet['ccd1'], triplet['ccd2'], triplet['ccd3']] + list(pairs['ccd1']) + list(pairs['ccd2'])
-        cand_mag = [triplet['mag1'], triplet['mag2'], triplet['mag3']] + list(pairs['mag1']) + list(pairs['mag2'])
-        cand_ml_score = [triplet['ml_score1'], triplet['ml_score2'], triplet['ml_score3']] + list(pairs['ml_score1']) + list(pairs['ml_score2'])
-        cand_fakeid = [triplet['fakeid1'], triplet['fakeid2'], triplet['fakeid3']] + list(pairs['fakeid1']) + list(pairs['fakeid2'])
-        cand_ra = map(self.ra_to_str, cand_ra)
-        cand_dec = map(self.dec_to_str, cand_dec)
-        
-        new_cand = np.array([cand_date, cand_ra, cand_dec, cand_expnum, cand_exptime, cand_band, \
-                              cand_ccd, cand_mag, cand_ml_score, cand_id, cand_fakeid])
-        columns = ['date','ra','dec','expnum','exptime','band','ccd','mag','ml_score','objid','fakeid'] 
-        candidate = pd.DataFrame(data = new_cand.T, columns = columns)
-        candidate = candidate.drop_duplicates()
-        candidate = candidate.sort_values(by='date')
-        candidate.to_csv("{0}{1}cand_{2}.csv".format(working_dir, output_dir, self.cand_num), index=False)
-        self.cand_num += 1
-        
+        for i in pairs.index:
+            cand_id = [triplet['id1'], triplet['id2'], triplet['id3'], pairs.loc[i]['id1'], pairs.loc[i]['id2']]
+            cand_ra = [triplet['ra1'], triplet['ra2'], triplet['ra3'], pairs.loc[i]['ra1'], pairs.loc[i]['ra2']]
+            cand_dec = [triplet['dec1'], triplet['dec2'], triplet['dec3'], pairs.loc[i]['dec1'], pairs.loc[i]['dec2']]
+            cand_date = [triplet['date1'], triplet['date2'], triplet['date3'], pairs.loc[i]['date1'], pairs.loc[i]['date2']]
+            cand_expnum = [triplet['expnum1'], triplet['expnum2'], triplet['expnum3'], pairs.loc[i]['expnum1'], pairs.loc[i]['expnum2']]
+            cand_exptime = [triplet['exptime1'], triplet['exptime2'], triplet['exptime3'], pairs.loc[i]['exptime1'], pairs.loc[i]['exptime2']]
+            cand_band = [triplet['band1'], triplet['band2'], triplet['band3'],  pairs.loc[i]['band1'], pairs.loc[i]['band2']]
+            cand_ccd = [triplet['ccd1'], triplet['ccd2'], triplet['ccd3'], pairs.loc[i]['ccd1'], pairs.loc[i]['ccd2']]
+            cand_mag = [triplet['mag1'], triplet['mag2'], triplet['mag3'], pairs.loc[i]['mag1'], pairs.loc[i]['mag2']]
+            cand_ml_score = [triplet['ml_score1'], triplet['ml_score2'], triplet['ml_score3'], pairs.loc[i]['ml_score1'], pairs.loc[i]['ml_score2']]
+            cand_fakeid = [triplet['fakeid1'], triplet['fakeid2'], triplet['fakeid3'], pairs.loc[i]['fakeid1'], pairs.loc[i]['fakeid2']]
+            cand_ra = map(self.ra_to_str, cand_ra)
+            cand_dec = map(self.dec_to_str, cand_dec)
+            
+            new_cand = np.array([cand_date, cand_ra, cand_dec, cand_expnum, cand_exptime, cand_band, \
+                                  cand_ccd, cand_mag, cand_ml_score, cand_id, cand_fakeid])
+            columns = ['date','ra','dec','expnum','exptime','band','ccd','mag','ml_score','objid','fakeid'] 
+            candidate = pd.DataFrame(data = new_cand.T, columns = columns)
+            candidate = candidate.drop_duplicates()
+            candidate = candidate.sort_values(by='date')
+            candidate.to_csv("{0}{1}cand_{2}_{3}.csv".format(working_dir, output_dir, NN, self.cand_num), index=False)
+            self.cand_num += 1
+                    
     def link_all(self):
         self.result = map(self.connect, list(self.triplets.index))
         print "starts with 150: {}".format(self.head150)
@@ -552,47 +556,67 @@ class connecting_pairs:
         print "lost in vcut: {}".format(self.lost_in_vcut)
         print "lost in linecheck: {}".format(self.lost_in_linecheck)
         print "lost in orbit: {}".format(self.lost_in_orbfit)
-        print "new discoveries: {}".format(self.new_discoveries)
+        print "new discoveries: {}".format(self.cand_num)
         
 def main():
     chunk_id = sys.argv[1]
     season = sys.argv[2]
+    year = sys.argv[3]
     global working_dir
     global output_dir
-    working_dir = 'wsdiff_catalogs/season{}/fakesonly/'.format(season)
-    #working_dir = '/nfs/lsa-spacerocks/wsdiff_catalogs/season{}/nofakes/'.format(season)
-    triplet_file = 'CHUNK_Y2/chunk_{}/chunk_good_triplets.csv'.format(chunk_id)
-    detections_file_Y2 = "wsdiff_season{}_Y2_griz_fakesonly.csv".format(season)
-    detections_file_Y3 = "wsdiff_season{}_Y3_griz_fakesonly.csv".format(season)
-    pair_file = 'wsdiff_season{}_Y3_griz_fakesonly_linkmap.pickle'.format(season)
-    output_dir = "linker_cands_Y2/chunk_{}/".format(chunk_id)
-    try:
-        os.mkdir('{0}/{1}'.format(working_dir, 'linker_cands_Y2'))
-    except OSError:
-        pass
-    try:
-    	os.mkdir('{0}/{1}'.format(working_dir, output_dir))
-    except OSError:
-	pass
-    all_detections_Y2 = pd.read_csv(working_dir+detections_file_Y2)
-    all_detections_Y3 = pd.read_csv(working_dir+detections_file_Y3)
+    #working_dir = 'wsdiff_catalogs/season{}/fakesonly/'.format(season)
+    working_dir = '/nfs/lsa-spacerocks/wsdiff_catalogs/season{}/nofakes/'.format(season)
+    triplet_file = 'CHUNK_{0}/chunk_{1}/chunk_good_triplets.csv'.format(year, chunk_id)
+    #detections_file_1st = 'wsdiff_season{0}_{1}_griz_nofakes.csv'.format(season, year)
+    linkmap_1st = 'wsdiff_season{0}_{1}_griz_nofakes_linkmap.pickle'.format(season, year)
+    detections_file_1st = linkmap_1st.replace('_linkmap.pickle', '.csv')
+    all_detections_1st = pd.read_csv(working_dir+detections_file_1st)
     tri = deparallaxed_triplets()
     tri.triplets = pd.read_csv(working_dir+triplet_file)
-    tri.detections = all_detections_Y2
+    tri.detections = all_detections_1st
     tri.new_triplets()
-    tri.useful_triplets()       
-
-    conn = connecting_pairs()
-    conn.triplets = tri.triplets[tri.useful_triplet]
-    conn.n_of_tri = len(conn.triplets)
-    conn.pairs = pickle.load(open(working_dir+pair_file))
-    conn.detections = all_detections_Y3
-    conn.gen_pair_list()
-    conn.pair_info0 = conn.getDatePos()
-    conn.link_all()
+    tri.useful_triplets()  
+     
+    #det_file_list  = glob.glob(working_dir+'wsdiff_season*Y?_griz_nofakes.csv')
+    linkmap_list  = glob.glob(working_dir+'wsdiff_season*Y?_griz_nofakes_linkmap.pickle')
+    det_file_list = [i.replace('_linkmap.pickle', '.csv') for i in linkmap_list]
+    det_file_list.remove(working_dir+detections_file_1st)
+    linkmap_list.remove(working_dir+linkmap_1st)
+    det_file_list.sort()
+    linkmap_list.sort()
+    
+    global NN
+    for n, i in enumerate(linkmap_list):
+        try:
+	    NN = n
+            detections_file_2nd = det_file_list[n]
+            pair_file = i
+            print "det_file: {}".format(detections_file_2nd)
+            print "pair_file: {}".format(i)
+            output_dir = "linker_cands_{0}/chunk_{1}/".format(year, chunk_id)
+            try:
+                os.mkdir('{0}/{1}'.format(working_dir, 'linker_cands_{}'.format(year)))
+            except OSError:
+                pass
+            try:
+                os.mkdir('{0}/{1}'.format(working_dir, output_dir))
+            except OSError:
+                pass
+            all_detections_2nd = pd.read_csv(detections_file_2nd)
+            conn = connecting_pairs()
+            conn.triplets = tri.triplets[tri.useful_triplet]
+            conn.n_of_tri = len(conn.triplets)
+            conn.pairs = pickle.load(open(pair_file))
+            conn.detections = all_detections_2nd
+            conn.gen_pair_list()
+            conn.pair_info0 = conn.getDatePos()
+            conn.link_all()
+        except IndexError:
+            pass	
 
 if __name__ == '__main__':
     main()
     
     
     
+

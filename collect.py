@@ -6,8 +6,8 @@
 #
 # Author: 
 # Edward Lin: hsingwel@umich.edu
+#
 ##########################################################################
-
 from __future__ import division
 import os, glob, sys
 import pandas as pd
@@ -33,7 +33,8 @@ class collect_object:
         self.clustering()
         self.group_tracks()
         self.clean_track()
-    
+ 	self.output()
+   
     def read_obj(self):
         self.df_obs_list = map(pd.read_csv, self.obj_list)
     
@@ -102,14 +103,15 @@ class collect_object:
         
     def output(self):
         for n, i in enumerate(self.good_tracks):
-            i.to_csv("{0}{1}good_{2}.csv".format(working_dir, object_dir, n), index=False)
+            i.to_csv("{0}good_{1}.csv".format(working_dir, n), index=False)
             
 def main():
     season = sys.argv[1]
+    #year = sys.argv[2]
     global working_dir
     global output_dir
-    working_dir = '/nfs/lsa-spacerocks/wsdiff_catalogs/season{}/nofakes/linker_cands_Y2_1/'.format(season)
-    obj_list = glob.glob("{}*/*.csv".format(working_dir))
+    working_dir = '/nfs/lsa-spacerocks/wsdiff_catalogs/season{0}/nofakes/'.format(season)
+    obj_list = glob.glob("{}/linker_cands_Y?/*/*.csv".format(working_dir))
     objects = collect_object(obj_list)
 
 if __name__ == '__main__':
