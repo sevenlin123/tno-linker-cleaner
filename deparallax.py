@@ -1,12 +1,14 @@
 ##########################################################################
 #
-# deparallax.py, version 0.1
+# deparallax.py, version 0.2
 #
-# Remove the parallax motion by transferring the topographic equatorial
+# Remove the TNO parallax motion by transferring the topographic equatorial
 # coordinate to barycentric equatorial coordinate. 
 #
 # Author: 
 # Edward Lin hsingwel@umich.edu
+#
+# v0.2: added parallax_distance function
 ##########################################################################
 
 import numpy as np
@@ -41,6 +43,31 @@ def topo_to_bary(tri_pos):
     decS = np.arcsin(zS/Rp)
     raS = np.arctan2(yS,xS)
     return raS, decS
+    
+def parallax_distance(ra1, ra2, dec1, dec2, mjd1, mjd2):
+    ts = load.timescale()
+    t1 = ts.tai(jd=mjd1+2400000.500428)
+    t2 = ts.tai(jd=mjd2+2400000.500428)
+    earth = planets['earth']      
+    x_earth1, y_earth1, z_earth1 = earth.at(t1).position.au
+    x_earth2, y_earth2, z_earth2 = earth.at(t2).position.au
+    vx = x_earth2-x_earth1
+    vy = y_earth2-y_earth1
+    vz = z_earth2-z_earth1  
+    velo = (vx**2+vy**2+vz**2)**0.5
+    dec_v = np.arcsin(vz/velo)
+    ra_v = np.arctan2(vy, vx)
+    x = np.cos(dec1)*np.cos(ra1)
+    y = np.cos(dec1)*np.sin(ra1)
+    z = np.sin(dec1)
+    theta = ((ra2-ra1)**2 + (dec2-dec1)**2)**0.5
+    vec1 = zip(x, y, z)
+    vec2 = zip(vx, vy, vz)
+    ab = abs(np.array((map(np.inner, vec1, vec2))))
+    cosphi = ab/velo
+    phi = ((ra1-ra_v)**2+(dec1-dec_v)**2)**0.5
+    parallax_dis = (1-cosphi**2)**0.5*velo/theta
+    return parallax_dis
     
 if __name__ == '__main__':
     print 'here'

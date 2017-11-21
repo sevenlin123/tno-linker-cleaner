@@ -18,5 +18,5 @@ for i in obs_list:
     i=i.strip()
     obs = pd.read_csv(i)
     orb = fit_orbit(obs)
-    print i, orb.chisq/orb.ndof
-    print orb.elements
+    #print i, orb.chisq/orb.ndof
+    print 'a:{0:7.2f} e:{1:5.2f} i:{2:6.2f} rchisq:{3:4.2f} file:{4}'.format(orb.elements['a'], orb.elements['e'], orb.elements['i'], orb.chisq/orb.ndof, i)
