@@ -2,15 +2,20 @@
 
 ##########################################################################
 #
-# connect.py, version 0.2
+# connect.py, version 0.5
 #
 # Connect triplets to the pairs in the other year. 
 #
 # Author: 
 # Edward Lin: hsingwel@umich.edu
 #
-#v0.2: output every 'Five' instead group them together
-#      connect pairs in every available years
+# v0.2: output every 'Five' instead group them together.
+#       connect pairs in every available years.
+# v0.3: cut "useful pairs" with parallax distances.
+# v0.4: cut pairs in barycentric equatorial space.
+# v0.4.1: adaptive cut radius
+# v0.5: only output tracks with 5 detections
+#       correct the line check residual calculation
 ##########################################################################
 
 from __future__ import division
@@ -20,7 +25,7 @@ import numpy as np
 import ephem
 from Orbit import Orbit
 import pickle
-from deparallax import topo_to_bary
+from deparallax import topo_to_bary, parallax_distance
 from scipy.spatial import cKDTree as KDTree
 from scipy.stats import linregress
 import os, sys, glob
@@ -194,8 +199,12 @@ class connecting_pairs:
         self.pairs = None #pickle.load(open(working_dir+pair_file))
         self.detections = None #all_detections_Y3
         self.new_pairs = None
+        self.dePara_cut = 4.
+        self.vcut = 5.
+        self.linecheck = 100
         self.should_be_detected = 0
         self.lost_in_useful_cut = 0
+        self.lost_in_dePara = 0
         self.lost_in_vcut = 0
         self.lost_in_linecheck = 0
         self.lost_in_orbfit = 0
@@ -252,9 +261,11 @@ class connecting_pairs:
         date1 = obj1['date'].values
         date2 = obj2['date'].values
         
+        d_para = parallax_distance(ra1, ra2, dec1, dec2, mjd1, mjd2)
+        
         return [ra1, ra2], [dec1, dec2], [mjd1, mjd2], [np.zeros(len(obj1)), np.zeros(len(obj2))],\
                [fakeid1, fakeid2], [id1, id2], [expnum1, expnum2], [exptime1, exptime2],\
-               [band1, band2], [ccd1, ccd2], [mag1, mag2], [ml_score1, ml_score2], [date1, date2]
+               [band1, band2], [ccd1, ccd2], [mag1, mag2], [ml_score1, ml_score2], [date1, date2], d_para
 
     def dePara_pair(self, pair_pos_list):
         del self.new_pairs
@@ -295,6 +306,12 @@ class connecting_pairs:
         date1 = pair_pos_list[12][0]
         date2 = pair_pos_list[12][1]
         
+        predict_ra = pair_pos_list[13][0]
+        predict_dec = pair_pos_list[13][1]
+        
+        distance =  (np.arcsin(np.sin(predict_ra)-np.sin(np.array(new_ra1)))**2 + (predict_dec-np.array(new_dec1))**2)**0.5
+        mask = distance < self.dePara_cut * np.pi/180.
+        
         vRA12 = (new_ra2 - new_ra1) / (mjd2-mjd1) 
         vDEC12 = (new_dec2 - new_dec1) / (mjd2-mjd1)
         
@@ -306,7 +323,8 @@ class connecting_pairs:
                    'mjd1', 'mjd2', 'fakeid1', 'fakeid2', 'ra1', 'ra2', 'dec1', 'dec2', 'expnum1', 'expnum2',\
                    'exptime1', 'exptime2', 'band1', 'band2', 'ccd1', 'ccd2', 'mag1', 'mag2', 'ml_score1',\
                    'ml_score2', 'date1', 'date2'] 
-        self.new_pairs = pd.DataFrame(data = new_pairs.T, columns = columns)
+        new_pairs = new_pairs.T[mask]
+        self.new_pairs = pd.DataFrame(data = new_pairs, columns = columns)
     
     def check_useful_pairs(self, tri_RA, tri_DEC, tri_mjd, dbary, vRA, vDEC):
         ra1 = self.pair_info0[0][0]
@@ -343,17 +361,20 @@ class connecting_pairs:
         date1 = self.pair_info0[12][0]
         date2 = self.pair_info0[12][1]        
         
+        d_para = self.pair_info0[13]
+        
         predict_ra = tri_RA + vRA * (mjd1.mean()-tri_mjd)
         predict_dec = tri_DEC + vDEC * (mjd1.mean()-tri_mjd)
         distance =  ((predict_ra-ra1)**2 + (predict_dec-dec1)**2)**0.5
-        mask = distance < 2.0 * np.pi/180.
-        
+        mask0 = abs(d_para-dbary1)/dbary1 < 1.
+        mask1 = distance < 10. * np.pi/180.
+        mask = mask0 * mask1 
         
         useful_pairs = ([ra1[mask], ra2[mask]], [dec1[mask], dec2[mask]], [mjd1[mask], mjd2[mask]], \
                         [dbary1[mask], dbary2[mask]], [fakeid1[mask], fakeid2[mask]], [id1[mask], id2[mask]], \
                         [expnum1[mask], expnum2[mask]], [exptime1[mask], exptime2[mask]], \
                         [band1[mask], band2[mask]], [ccd1[mask], ccd2[mask]], [mag1[mask], mag2[mask]],\
-                        [ml_score1[mask], ml_score2[mask]], [date1[mask], date2[mask]]) 
+                        [ml_score1[mask], ml_score2[mask]], [date1[mask], date2[mask]], [predict_ra, predict_dec]) 
         return useful_pairs
     
     def gen_pair_list(self):
@@ -374,7 +395,7 @@ class connecting_pairs:
         #x5 = self.new_pairs.loc[match, ['new_ra2']].values[0]
         #y5 = self.new_pairs.loc[match, ['new_dec2']].values[0]
         result, res, rank, singular, rcond = np.polyfit([x1, x2, x3, x4, x5], [y1, y2, y3, y4, y5], 1, full=True)
-        return res[0]*180/np.pi*3600 < 0.1
+        return ((res[0]*(180/np.pi*3600)**2)/4.)**0.5 < self.linecheck
     
     def check_Orbit(self, ra, dec, date, chisq_cut=2):
         #print "checking Orbit..."
@@ -395,10 +416,11 @@ class connecting_pairs:
         ralist = [str(ephem.hours(i)) for i in ra]
         declist = [str(ephem.degrees(i)) for i in dec]
         datelist = [str(ephem.date(i)) for i in date]
-        orbit = Orbit(dates=datelist, ra=ralist, dec=declist, obscode=np.ones(5, dtype=int)*807, err=0.15)
+        orbit = Orbit(dates=datelist, ra=ralist, dec=declist, obscode=np.ones(5, dtype=int)*807, err=0.25)
         return orbit.chisq/orbit.ndof<chisq_cut
                   
     def connect(self, index):
+        debug_msg = ''
         if len(self.pair_list) == 0: 
             return 0 
         triplet = self.triplets.loc[index]
@@ -406,37 +428,55 @@ class connecting_pairs:
         self.fakeid = triplet['fakeid']
         if self.fakeid == -1:
             self.not_real += 1
-        elif self.fakeid < 160000000:
+        elif self.fakeid < 300000000:
             self.head150 += 1
         else:
             self.head801 += 1
         
-        print "triplet number: {0}/{1}, fakeid: {2}".format(index, self.n_of_tri, self.fakeid)
+        print "tri: {0}/{1}, fid: {2}, ".format(index, self.n_of_tri, self.fakeid),
  
         found_in_pairs0 = self.fakeid in self.pair_info0[4][0] and self.fakeid in self.pair_info0[4][1]
-        if found_in_pairs0 and self.fakeid < 160000000:
+        if found_in_pairs0 and self.fakeid < 300000000:
+            detable = True
             self.should_be_detected += 1
             self.det150 += 1
-        elif found_in_pairs0 and self.fakeid > 160000000:
-            self.should_be_detected += 1
+        elif found_in_pairs0 and self.fakeid > 300000000:
+            detable = False
             self.det801 += 1
-    
+        else:
+            detable = False
+            
+        
+        print "detable: {}, result: ".format(detable),
         vRA = (triplet['new_ra3'] - triplet['new_ra1']) / (triplet['mjd3'] - triplet['mjd1'])
         vDEC = (triplet['new_dec3'] - triplet['new_dec1']) / (triplet['mjd3'] - triplet['mjd1'])
         
         pair_pos_list = self.check_useful_pairs(triplet['ra1'], triplet['dec1'], triplet['mjd1'], triplet['dbary'], vRA, vDEC)
         if found_in_pairs0 and len(pair_pos_list[0][0]) == 0:
             self.lost_in_useful_cut += 1
+            print 'lost in useful cut!'
             return 0
         elif len(pair_pos_list[0][0]) == 0:
+            print ' '
             return 0
             
         self.dePara_pair(pair_pos_list)
-        #print "triplet fakeid: {0}".format(triplet['fakeid'])
+        
         found_in_pairs = len(self.new_pairs.loc[np.logical_and(self.new_pairs['fakeid1'] == triplet['fakeid'], self.new_pairs['fakeid2'] == triplet['fakeid'])])
-        #print "Number of pairs with correct fakeid: {0}".format(found_in_pairs)       
-        if found_in_pairs == 0 and  found_in_pairs0 != 0:
-            self.lost_in_useful_cut += 1
+        debug_msg += "# of pairs with correct fakeid after dePara: {0}, ".format(found_in_pairs)
+               
+        if found_in_pairs == 0 and  found_in_pairs0 != 0 and len(self.new_pairs) != 0:
+            self.lost_in_dePara += 1
+            print 'lost in dePara!'
+        elif found_in_pairs == 0 and  found_in_pairs0 != 0 and len(self.new_pairs) == 0:
+            self.lost_in_dePara += 1
+            print 'lost in dePara!'
+            print debug_msg
+            return 0
+        elif found_in_pairs == 0 and  found_in_pairs0 == 0 and len(self.new_pairs) == 0:
+            print ' '
+            return 0        
+        
         pair_mjd1_list = np.array(self.new_pairs.groupby(['mjd1']).sum().index)
         pair_mjd2_list = np.array(self.new_pairs.groupby(['mjd2']).sum().index)
         tree_v = KDTree(zip(self.new_pairs['vRA12'].values, self.new_pairs['vDEC12'].values))
@@ -448,36 +488,41 @@ class connecting_pairs:
         predicted_ra2[predicted_ra2<0] += 2*np.pi
         predicted_ra1[predicted_ra1 > 2*np.pi] -= 2*np.pi 
         predicted_ra2[predicted_ra2 > 2*np.pi] -= 2*np.pi 
-        v_match = np.array(tree_v.query_ball_point([vRA, vDEC], 30/3600.* np.pi/180.))
+        v_match = np.array(tree_v.query_ball_point([vRA, vDEC], self.vcut/3600.* np.pi/180.))
         v_match.sort()
         found_in_pairs_vmatch = np.logical_and(self.new_pairs.loc[v_match]['fakeid1'] == self.fakeid, self.new_pairs.loc[v_match]['fakeid2'] == self.fakeid).sum()
-        #print "Number of pairs after v_cut: {0}".format(len(v_match))
+        debug_msg += "# of pairs after v_cut: {0}, ".format(len(v_match))
         if len(v_match) == 0 and found_in_pairs != 0:
             self.lost_in_vcut += 1
+            print 'lost in vcut!'
+            print debug_msg
             return 0
         elif len(v_match) == 0:
+            print ' '
             return 0
         elif found_in_pairs_vmatch ==0 and found_in_pairs != 0:
             self.lost_in_vcut += 1
-                
-        #self.slope, self.intercept, r_value, p_value, self.std = linregress(np.array(triplet[['ra1', 'ra2', 'ra3']]),\
-        #                                                                    np.array(triplet[['dec1', 'dec2', 'dec3']]))
-        #mask_vcheck = self.new_pairs.index.isin(match)     
+            print 'lost in vcut!'
+                     
         ra1 = self.new_pairs.loc[v_match]['new_ra1'].values
         ra2 = self.new_pairs.loc[v_match]['new_ra2'].values
         dec1 = self.new_pairs.loc[v_match]['new_dec1'].values
         dec2 = self.new_pairs.loc[v_match]['new_dec2'].values
         line_check = np.array(map(self.check_line, ra1, ra2, dec1, dec2))
-        #print "Number of pairs after line_check: {0}".format(line_check.sum())
+        debug_msg += "# of pairs after line_check: {0}, ".format(line_check.sum())
         found_after_linecheck = len(self.new_pairs.loc[v_match[line_check]][np.logical_and(self.new_pairs.loc[v_match[line_check]]['fakeid1'] == triplet['fakeid'], self.new_pairs.loc[v_match[line_check]]['fakeid2'] == triplet['fakeid'])])
-        #print "Number of pairs with correct fakeid after line_check: {0}".format(found_after_linecheck)
+        debug_msg += "# of pairs with correct fakeid after line_check: {0}, ".format(found_after_linecheck)
         if line_check.sum() == 0 and found_in_pairs_vmatch != 0:
             self.lost_in_linecheck +=1
+            print 'lost in linecheck!'
+            print debug_msg
             return 0
         elif line_check.sum() == 0:
+            print ' '
             return 0
         elif found_after_linecheck ==0 and found_in_pairs_vmatch != 0:
             self.lost_in_linecheck +=1
+            print 'lost in linecheck!'
         
         self.remain_pairs0 = self.new_pairs.loc[v_match[line_check]]
         ra1 = self.new_pairs.loc[v_match[line_check]]['ra1'].values
@@ -486,10 +531,19 @@ class connecting_pairs:
         dec2 = self.new_pairs.loc[v_match[line_check]]['dec2'].values
         mjd1 = self.new_pairs.loc[v_match[line_check]]['mjd1'].values - 15019.5
         mjd2 = self.new_pairs.loc[v_match[line_check]]['mjd2'].values - 15019.5
-        #print len(ra1)
+        
         orbit_check = np.array(map(self.check_Orbit, zip(ra1, ra2), zip(dec1, dec2), zip(mjd1, mjd2)))
         self.remain_pairs = self.new_pairs.loc[v_match[line_check][orbit_check]]
-        #print "Number of pairs after orbit_check: {0}".format(len(self.remain_pairs))
+        debug_msg += "# of pairs after orbit_check: {0}".format(len(self.remain_pairs))
+        if detable and len(self.remain_pairs) ==0:
+            print "not detect"
+            print debug_msg
+        elif detable and len(self.remain_pairs) !=0:
+            print "detected!"
+        else:
+            print " "
+            
+        
         if len(self.remain_pairs) == 0 and found_after_linecheck != 0:
             self.lost_in_orbfit +=1
             return 0
@@ -540,8 +594,9 @@ class connecting_pairs:
             candidate = pd.DataFrame(data = new_cand.T, columns = columns)
             candidate = candidate.drop_duplicates()
             candidate = candidate.sort_values(by='date')
-            candidate.to_csv("{0}{1}cand_{2}_{3}.csv".format(working_dir, output_dir, NN, self.cand_num), index=False)
-            self.cand_num += 1
+            if len(candidate) == 5:
+                candidate.to_csv("{0}{1}cand_{2}_{3}.csv".format(working_dir, output_dir, NN, self.cand_num), index=False)
+                self.cand_num += 1
                     
     def link_all(self):
         self.result = map(self.connect, list(self.triplets.index))
@@ -553,6 +608,7 @@ class connecting_pairs:
         print "should be detected 801: {}".format(self.det801)
         print "detected: {}".format(np.array(self.result).sum())
         print "lost in useful_cut: {}".format(self.lost_in_useful_cut)
+        print "lost in dePara: {}".format(self.lost_in_dePara)
         print "lost in vcut: {}".format(self.lost_in_vcut)
         print "lost in linecheck: {}".format(self.lost_in_linecheck)
         print "lost in orbit: {}".format(self.lost_in_orbfit)
@@ -564,12 +620,15 @@ def main():
     year = sys.argv[3]
     global working_dir
     global output_dir
-    #working_dir = 'wsdiff_catalogs/season{}/fakesonly/'.format(season)
-    working_dir = '/nfs/lsa-spacerocks/wsdiff_catalogs/season{}/nofakes/'.format(season)
+    working_dir = 'wsdiff_catalogs/season{}/fakesonly/'.format(season)
+    #working_dir = '/nfs/lsa-spacerocks/wsdiff_catalogs/season{}/nofakes/'.format(season)
     triplet_file = 'CHUNK_{0}/chunk_{1}/chunk_good_triplets.csv'.format(year, chunk_id)
+    detections_file_1st = 'wsdiff_season{0}_{1}_griz_fakesonly.csv'.format(season, year)
+    linkmap_1st = 'wsdiff_season{0}_{1}_griz_fakesonly_linkmap.pickle'.format(season, year)
     #detections_file_1st = 'wsdiff_season{0}_{1}_griz_nofakes.csv'.format(season, year)
-    linkmap_1st = 'wsdiff_season{0}_{1}_griz_nofakes_linkmap.pickle'.format(season, year)
-    detections_file_1st = linkmap_1st.replace('_linkmap.pickle', '.csv')
+    #linkmap_1st = 'wsdiff_season{0}_{1}_griz_nofakes_linkmap.pickle'.format(season, year)
+
+
     all_detections_1st = pd.read_csv(working_dir+detections_file_1st)
     tri = deparallaxed_triplets()
     tri.triplets = pd.read_csv(working_dir+triplet_file)
@@ -577,46 +636,47 @@ def main():
     tri.new_triplets()
     tri.useful_triplets()  
      
-    #det_file_list  = glob.glob(working_dir+'wsdiff_season*Y?_griz_nofakes.csv')
-    linkmap_list  = glob.glob(working_dir+'wsdiff_season*Y?_griz_nofakes_linkmap.pickle')
+    linkmap_list  = glob.glob(working_dir+'wsdiff_season*Y?_griz_fakesonly_linkmap.pickle')
+    #linkmap_list  = glob.glob(working_dir+'wsdiff_season*Y?_griz_nofakes_linkmap.pickle')
     det_file_list = [i.replace('_linkmap.pickle', '.csv') for i in linkmap_list]
-    det_file_list.remove(working_dir+detections_file_1st)
-    linkmap_list.remove(working_dir+linkmap_1st)
+    #det_file_list.remove(working_dir+detections_file_1st)
+    #linkmap_list.remove(working_dir+linkmap_1st)
     det_file_list.sort()
-    linkmap_list.sort()
+    linkmap_list.sort()    
+    print det_file_list, linkmap_list
     
     global NN
     for n, i in enumerate(linkmap_list):
+        NN = n
+        detections_file_2nd = det_file_list[n]
+        pair_file = i
+        print "det_file: {}".format(detections_file_2nd)
+        print "pair_file: {}".format(i)
+        output_dir = "linker_cands_{0}/chunk_{1}/".format(year, chunk_id)
         try:
-	    NN = n
-            detections_file_2nd = det_file_list[n]
-            pair_file = i
-            print "det_file: {}".format(detections_file_2nd)
-            print "pair_file: {}".format(i)
-            output_dir = "linker_cands_{0}/chunk_{1}/".format(year, chunk_id)
-            try:
-                os.mkdir('{0}/{1}'.format(working_dir, 'linker_cands_{}'.format(year)))
-            except OSError:
-                pass
-            try:
-                os.mkdir('{0}/{1}'.format(working_dir, output_dir))
-            except OSError:
-                pass
-            all_detections_2nd = pd.read_csv(detections_file_2nd)
-            conn = connecting_pairs()
-            conn.triplets = tri.triplets[tri.useful_triplet]
-            conn.n_of_tri = len(conn.triplets)
+            os.mkdir('{0}/{1}'.format(working_dir, 'linker_cands_{}'.format(year)))
+        except OSError:
+            pass
+        try:
+            os.mkdir('{0}/{1}'.format(working_dir, output_dir))
+        except OSError:
+            pass
+        all_detections_2nd = pd.read_csv(detections_file_2nd)
+        conn = connecting_pairs()
+        conn.dePara_cut = 2.5 * (1+ 0.5*(abs(float(year[-1]) -  float(i.split('Y')[1][0]))))
+        conn.triplets = tri.triplets[tri.useful_triplet]
+        conn.n_of_tri = len(conn.triplets)
+        try:
             conn.pairs = pickle.load(open(pair_file))
             conn.detections = all_detections_2nd
             conn.gen_pair_list()
             conn.pair_info0 = conn.getDatePos()
             conn.link_all()
         except IndexError:
-            pass	
+            pass
 
 if __name__ == '__main__':
     main()
     
     
     
-
