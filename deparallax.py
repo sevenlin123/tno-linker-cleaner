@@ -1,6 +1,6 @@
 ##########################################################################
 #
-# deparallax.py, version 0.2
+# deparallax.py, version 0.2.2
 #
 # Remove the TNO parallax motion by transferring the topographic equatorial
 # coordinate to barycentric equatorial coordinate. 
@@ -9,18 +9,20 @@
 # Edward Lin hsingwel@umich.edu
 #
 # v0.2: added parallax_distance function
+# v0.2.1: fixed negative RA issue
+# v0.2.2: fixed 'nan' mjd issue
 ##########################################################################
 
 import numpy as np
 from skyfield.api import load
-
 planets = load('de423.bsp')
 
 def topo_to_bary(tri_pos):
     ra = tri_pos[0]
     dec = tri_pos[1]
-    mjd = tri_pos[2]
+    mjd = np.array(tri_pos[2])
     R = tri_pos[3]
+    mjd[np.isnan(mjd)] = 50000
     #print ra[4], dec[4], mjd[4], R[4]
     ts = load.timescale()
     t = ts.tai(jd=mjd+2400000.500428)
@@ -42,10 +44,14 @@ def topo_to_bary(tri_pos):
 #   print R, delta, earth_distance, x,y,z, x_earth, y_earth, z_earth, xS, yS, zS, Rp
     decS = np.arcsin(zS/Rp)
     raS = np.arctan2(yS,xS)
+    raS[raS < 0] += 2*np.pi
+    raS[raS > 2*np.pi] -= 2*np.pi
     return raS, decS
     
 def parallax_distance(ra1, ra2, dec1, dec2, mjd1, mjd2):
     ts = load.timescale()
+    mjd1[np.isnan(mjd1)] = 50000
+    mjd2[np.isnan(mjd2)] = 50000
     t1 = ts.tai(jd=mjd1+2400000.500428)
     t2 = ts.tai(jd=mjd2+2400000.500428)
     earth = planets['earth']      
