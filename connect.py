@@ -2,7 +2,7 @@
 
 ##########################################################################
 #
-# connect.py, version 0.5
+# connect.py, version 0.6
 #
 # Connect triplets to the pairs in the other year. 
 #
@@ -16,6 +16,8 @@
 # v0.4.1: adaptive cut radius
 # v0.5: only output tracks with 5 detections
 #       correct the line check residual calculation
+# v0.6: use parallax distance instead orbfit barycentric distance, when 
+#       ndof = 2 or distance > 450  
 ##########################################################################
 
 from __future__ import division
@@ -90,11 +92,19 @@ class deparallaxed_triplets:
         date2 = obj2['date'].values
         date3 = obj3['date'].values
         
+        pdis1 = parallax_distance(ra1, ra2, dec1, dec2, mjd1, mjd2)
+        pdis2 = parallax_distance(ra2, ra3, dec2, dec3, mjd2, mjd3)
+        pdis = (pdis1 + pdis2)/2.
+        
         dbary = self.triplets['dbary'].values
+        ndof2 = np.array(self.triplets['ndof'] == 2)
+        dbary[dbary > 450] = pdis[dbary > 450]
+        dbary[ndof2] = pdis[ndof2]
+        
         return [ra1, ra2, ra3], [dec1, dec2, dec3], [mjd1, mjd2, mjd3], [dbary, dbary, dbary],\
                [expnum1, expnum2, expnum3], [exptime1, exptime2, exptime3], [band1, band2, band3],\
                [ccd1, ccd2, ccd3,], [mag1, mag2, mag3], [ml_score1, ml_score2, ml_score3],\
-               [fakeid1, fakeid2, fakeid3], [date1, date2, date3]
+               [fakeid1, fakeid2, fakeid3], [date1, date2, date3], pdis
     
     def dePara_tri(self, tri_pos_list):
         list0 = [tri_pos_list[0][0], tri_pos_list[1][0], tri_pos_list[2][0], tri_pos_list[3][0]]
@@ -140,6 +150,9 @@ class deparallaxed_triplets:
         date1 = tri_pos_list[11][0]
         date2 = tri_pos_list[11][1]
         date3 = tri_pos_list[11][2]
+        pdis = tri_pos_list[12]
+        
+        self.triplets = self.triplets.assign(pdis = pd.Series(pdis))
         self.triplets = self.triplets.assign(new_ra1 = pd.Series(new_ra1))
         self.triplets = self.triplets.assign(new_ra2 = pd.Series(new_ra2))
         self.triplets = self.triplets.assign(new_ra3 = pd.Series(new_ra3))
@@ -366,8 +379,8 @@ class connecting_pairs:
         predict_ra = tri_RA + vRA * (mjd1.mean()-tri_mjd)
         predict_dec = tri_DEC + vDEC * (mjd1.mean()-tri_mjd)
         distance =  ((predict_ra-ra1)**2 + (predict_dec-dec1)**2)**0.5
-        mask0 = abs(d_para-dbary1)/dbary1 < 1.
-        mask1 = distance < 10. * np.pi/180.
+        mask0 = abs(d_para-dbary1)/dbary1 < .5
+        mask1 = distance < 5. * np.pi/180.
         mask = mask0 * mask1 
         
         useful_pairs = ([ra1[mask], ra2[mask]], [dec1[mask], dec2[mask]], [mjd1[mask], mjd2[mask]], \
@@ -437,19 +450,27 @@ class connecting_pairs:
  
         found_in_pairs0 = self.fakeid in self.pair_info0[4][0] and self.fakeid in self.pair_info0[4][1]
         if found_in_pairs0 and self.fakeid < 300000000:
-            detable = True
+            detectable = True
             self.should_be_detected += 1
             self.det150 += 1
         elif found_in_pairs0 and self.fakeid > 300000000:
-            detable = False
+            detectable = False
             self.det801 += 1
         else:
-            detable = False
+            detectable = False
             
         
-        print "detable: {}, result: ".format(detable),
+        print "detectable: {}, result: ".format(detectable),
         vRA = (triplet['new_ra3'] - triplet['new_ra1']) / (triplet['mjd3'] - triplet['mjd1'])
         vDEC = (triplet['new_dec3'] - triplet['new_dec1']) / (triplet['mjd3'] - triplet['mjd1'])
+        #if triplet['ndof'] == 2:
+        #    print 'ndof=2, dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
+        #    dbary = triplet['pdis']
+        #elif triplet['dbary'] > 450:
+        #    print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
+        #    dbary = triplet['dbary']
+        #else:
+        #    dbary = triplet['dbary']
         
         pair_pos_list = self.check_useful_pairs(triplet['ra1'], triplet['dec1'], triplet['mjd1'], triplet['dbary'], vRA, vDEC)
         if found_in_pairs0 and len(pair_pos_list[0][0]) == 0:
@@ -467,9 +488,11 @@ class connecting_pairs:
                
         if found_in_pairs == 0 and  found_in_pairs0 != 0 and len(self.new_pairs) != 0:
             self.lost_in_dePara += 1
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print 'lost in dePara!'
         elif found_in_pairs == 0 and  found_in_pairs0 != 0 and len(self.new_pairs) == 0:
             self.lost_in_dePara += 1
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print 'lost in dePara!'
             print debug_msg
             return 0
@@ -494,6 +517,7 @@ class connecting_pairs:
         debug_msg += "# of pairs after v_cut: {0}, ".format(len(v_match))
         if len(v_match) == 0 and found_in_pairs != 0:
             self.lost_in_vcut += 1
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print 'lost in vcut!'
             print debug_msg
             return 0
@@ -502,6 +526,7 @@ class connecting_pairs:
             return 0
         elif found_in_pairs_vmatch ==0 and found_in_pairs != 0:
             self.lost_in_vcut += 1
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print 'lost in vcut!'
                      
         ra1 = self.new_pairs.loc[v_match]['new_ra1'].values
@@ -514,6 +539,7 @@ class connecting_pairs:
         debug_msg += "# of pairs with correct fakeid after line_check: {0}, ".format(found_after_linecheck)
         if line_check.sum() == 0 and found_in_pairs_vmatch != 0:
             self.lost_in_linecheck +=1
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print 'lost in linecheck!'
             print debug_msg
             return 0
@@ -522,6 +548,7 @@ class connecting_pairs:
             return 0
         elif found_after_linecheck ==0 and found_in_pairs_vmatch != 0:
             self.lost_in_linecheck +=1
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print 'lost in linecheck!'
         
         self.remain_pairs0 = self.new_pairs.loc[v_match[line_check]]
@@ -536,6 +563,7 @@ class connecting_pairs:
         self.remain_pairs = self.new_pairs.loc[v_match[line_check][orbit_check]]
         debug_msg += "# of pairs after orbit_check: {0}".format(len(self.remain_pairs))
         if detable and len(self.remain_pairs) ==0:
+            print 'dbary = {}, pdis = {}'.format(triplet['dbary'], triplet['pdis']),
             print "not detect"
             print debug_msg
         elif detable and len(self.remain_pairs) !=0:
