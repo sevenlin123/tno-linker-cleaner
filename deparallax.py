@@ -11,8 +11,9 @@
 # v0.2: added parallax_distance function
 # v0.2.1: fixed negative RA issue
 # v0.2.2: fixed 'nan' mjd issue
-# v0.3: correct the elongation calculation; force R to be an array
-# v0.4: project the coordinate to around 90, 0
+# v0.3: correct the elongation calculation with proper great-circle distance;
+#       force R to be an array
+# v0.4: testing: project the coordinate to low latitude 
 ##########################################################################
 
 import numpy as np
@@ -26,7 +27,7 @@ def arc(RA1, RA2, DEC1, DEC2):
     ARC = 2*np.arcsin(c)
     return ARC
     
-def topo_to_bary(tri_pos):
+def topo_to_bary(tri_pos, ra_mean, dec_mean):
     ra = np.array(tri_pos[0])
     dec = np.array(tri_pos[1])
     mjd = np.array(tri_pos[2])
@@ -51,20 +52,21 @@ def topo_to_bary(tri_pos):
     Rp = (xS**2+yS**2+zS**2)**0.5
     decS = np.arcsin(zS/Rp)
     raS = np.arctan2(yS,xS)%(2*np.pi)
-    #return raS, decS
-    ra_mean = ra.mean()
-    dec_mean = dec.mean()
+    return raS, decS
+    #ra_mean = ra.mean()
+    #dec_mean = dec.mean()
     
-    midraS, middecS = raS.mean(), decS.mean()
-    lat_off = np.radians(5.0)
-    xaxis, yaxis, zaxis = (0, 0), (np.pi/2, 0), (0, np.pi/2)
-    nxaxis, nyaxis, nzaxis = ((midraS-np.pi/2)%(2*np.pi), 0), (midraS, middecS), ((midraS+np.pi)%(2*np.pi), (np.pi/2.0-middecS))
-    nx = np.cos(arc(nxaxis[0], xaxis[0], nxaxis[1], xaxis[1]))*xS + np.cos(arc(nxaxis[0], yaxis[0], nxaxis[1], yaxis[1]))*yS + np.cos(arc(nxaxis[0], zaxis[0], nxaxis[1], zaxis[1]))*zS
-    ny = np.cos(arc(nyaxis[0], xaxis[0], nyaxis[1], xaxis[1]))*xS + np.cos(arc(nyaxis[0], yaxis[0], nyaxis[1], yaxis[1]))*yS + np.cos(arc(nyaxis[0], zaxis[0], nyaxis[1], zaxis[1]))*zS
-    nz = np.cos(arc(nzaxis[0], xaxis[0], nzaxis[1], xaxis[1]))*xS + np.cos(arc(nzaxis[0], yaxis[0], nzaxis[1], yaxis[1]))*yS + np.cos(arc(nzaxis[0], zaxis[0], nzaxis[1], zaxis[1]))*zS
-    ndecS = np.arcsin(nz/Rp)
-    nraS = np.arctan2(ny,nx)%(2*np.pi)
-    return nraS, ndecS
+    #midraS, middecS = raS.mean(), decS.mean()
+    #midraS, middecS = ra_mean, dec_mean
+    #lat_off = np.radians(5.0)
+    #xaxis, yaxis, zaxis = (0, 0), (np.pi/2, 0), (0, np.pi/2)
+    #nxaxis, nyaxis, nzaxis = ((midraS-np.pi/2)%(2*np.pi), 0), (midraS, middecS), ((midraS+np.pi)%(2*np.pi), (np.pi/2.0-middecS))
+    #nx = np.cos(arc(nxaxis[0], xaxis[0], nxaxis[1], xaxis[1]))*xS + np.cos(arc(nxaxis[0], yaxis[0], nxaxis[1], yaxis[1]))*yS + np.cos(arc(nxaxis[0], zaxis[0], nxaxis[1], zaxis[1]))*zS
+    #ny = np.cos(arc(nyaxis[0], xaxis[0], nyaxis[1], xaxis[1]))*xS + np.cos(arc(nyaxis[0], yaxis[0], nyaxis[1], yaxis[1]))*yS + np.cos(arc(nyaxis[0], zaxis[0], nyaxis[1], zaxis[1]))*zS
+    #nz = np.cos(arc(nzaxis[0], xaxis[0], nzaxis[1], xaxis[1]))*xS + np.cos(arc(nzaxis[0], yaxis[0], nzaxis[1], yaxis[1]))*yS + np.cos(arc(nzaxis[0], zaxis[0], nzaxis[1], zaxis[1]))*zS
+    #ndecS = np.arcsin(nz/Rp)
+    #nraS = np.arctan2(ny,nx)%(2*np.pi)
+    #return nraS, ndecS
     
 def parallax_distance(ra1, ra2, dec1, dec2, mjd1, mjd2):
     ts = load.timescale()
